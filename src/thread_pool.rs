@@ -28,7 +28,11 @@ impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Message>>>) -> Worker {
         // 创建线程，其内循环不主动退出
         // spawn函数会返回一个JoinHandle, 需要这个返回值等待线程的安全退出，在Drop资源时使用
-        let t = thread::spawn(move || {
+        let t = thread::Builder::new()
+            .name(format!("worker-{}", id))
+            .spawn(move || {
+                let thread_name = thread::current().name().unwrap_or("Unnamed thread").to_string();
+                println!("[{}] Started", thread_name);
             loop {
                 // 接收发送来的任务
                 // 这里的实现略显粗糙，unwrap可能会造成程序的panic退出
@@ -76,7 +80,7 @@ impl Worker {
                 }
                 */
             }
-        });
+        }).expect("Failed to spawn thread");
 
         Worker {
             _id: id,
