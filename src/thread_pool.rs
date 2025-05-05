@@ -18,8 +18,8 @@ enum Message {
 // 一个worker 包含worker编号 + 线程
 //
 struct Worker {
-    _id: usize, // worker num
-    t: Option<JoinHandle<()>>,
+    _id: usize,                // worker num
+    t: Option<JoinHandle<()>>, // 持有线程JoinHandle
 }
 
 #[allow(dead_code)]
@@ -27,13 +27,41 @@ impl Worker {
     // 传递线程id、channel's receiver side
     fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Message>>>) -> Worker {
         // 创建线程，其内循环不主动退出
-        // spawn函数会返回一个JoinHandle
+        // spawn函数会返回一个JoinHandle, 需要这个返回值等待线程的安全退出，在Drop资源时使用
         let t = thread::spawn(move || {
             loop {
                 // 接收发送来的任务
-                // 这里的实现略显粗糙，unwrap会造成程序的panic退出
-                let message = receiver.lock().unwrap().recv().unwrap();
-                // 使用模式匹配 匹配所有分支情况
+                // 这里的实现略显粗糙，unwrap可能会造成程序的panic退出
+                // let message = receiver.lock().unwrap().recv().unwrap();
+
+                // 首先应该尝试获取锁
+                let lock = match receiver.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => {
+                        eprintln!(
+                            "Worker [{id}] failed to acquire lock due to poisoning. Attempting to recover."
+                        );
+                        poisoned.into_inner() // 尝试恢复，这是被rust所允许的，尽管知道风险但是还是愿意自己承担风险使用中毒后的值
+                    }
+                };
+                // 然后再尝试从channel中接收消息
+                match lock.recv() {
+                    Ok(Message::NewJob(job)) => {
+                        println!("do job from worker[{}]", id);
+                        job();
+                    }
+                    // 如果是byebye信号就退出线程
+                    Ok(Message::ByeBye) => {
+                        println!("ByeBye from worker[{}]", id);
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("Worker [{id}] channel disconnected: {e}");
+                        break;
+                    }
+                }
+
+                /* 使用模式匹配 匹配所有分支情况
                 match message {
                     // 如果传递进来的是新任务就执行
                     Message::NewJob(job) => {
@@ -46,6 +74,7 @@ impl Worker {
                         break;
                     }
                 }
+                */
             }
         });
 
