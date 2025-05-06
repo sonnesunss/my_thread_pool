@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 
 type Job = Box<dyn FnOnce() + 'static + Send>;
+// 线程池内允许的最大job数量的默认值
+const MAX_QUEUE_SIZE: usize = 100;
 
 // 定义可以通过mpsc channel发送的msg类型
 enum Message {
@@ -79,9 +81,9 @@ impl Worker {
 // 2. 定义工作线程数组，表示具体的工作者族群
 // 3. 如何给线程池内的线程发送一段工作逻辑呢？ 使用mpsc Channel是一个不错的选择，mpsc channel是共享、广播的
 pub struct ThreadPool {
-    workers: Vec<Worker>,                  // Worker array
-    max_workers: usize,                    // max threads
-    sender: Option<mpsc::Sender<Message>>, // channel's sender side
+    workers: Vec<Worker>,                      // Worker array
+    max_workers: usize,                        // max threads
+    sender: Option<mpsc::SyncSender<Message>>, // channel's sender side
 }
 
 #[allow(dead_code)]
@@ -91,8 +93,8 @@ impl ThreadPool {
             panic!("max_workers must be greater than zero!")
         }
 
-        // 创建一个channel， 使用它传递具体要执行的任务
-        let (tx, rx) = mpsc::channel();
+        // 创建一个channel，使用它传递具体要执行的任务
+        let (tx, rx) = mpsc::sync_channel(MAX_QUEUE_SIZE);
 
         let mut workers = Vec::with_capacity(max_workers);
         let receiver = Arc::new(Mutex::new(rx));
@@ -172,6 +174,7 @@ mod tests {
         let _ = p.execute(|| println!("do new job5"));
     }
 
+    #[test]
     fn test_shutdown() {
         let mut p = ThreadPool::new(5);
         let _ = p.execute(|| println!("do new job1"));
