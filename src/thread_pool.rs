@@ -2,6 +2,7 @@
    实现自己的线程池
 */
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 
@@ -37,10 +38,7 @@ impl Worker {
                 println!("[{}] Started", thread_name);
             loop {
                 // 接收发送来的任务
-                // 这里的实现略显粗糙，unwrap可能会造成程序的panic退出
-                // let message = receiver.lock().unwrap().recv().unwrap();
-
-                // 首先应该尝试获取锁
+                // 首先获取锁
                 let lock = match receiver.lock() {
                     Ok(guard) => guard,
                     Err(poisoned) => {
@@ -50,11 +48,14 @@ impl Worker {
                         poisoned.into_inner() // 尝试恢复，这是被rust所允许的，尽管知道风险但是还是愿意自己承担风险使用中毒后的值
                     }
                 };
-                // 然后再尝试从channel中接收消息
+                // 然后从channel中接收消息
                 match lock.recv() {
                     Ok(Message::NewJob(job)) => {
                         println!("do job from worker[{}]", id);
-                        job();
+                        let result = catch_unwind(AssertUnwindSafe(job));
+                        if let Err(e) = result {
+                            eprintln!("Job panicked in worker[{}] with error {:?}, but thread continue.", id, e);
+                        }
                     }
                     // 如果是byebye信号就退出线程
                     Ok(Message::ByeBye) => {
@@ -183,5 +184,16 @@ mod tests {
         let _ = p.execute(|| println!("do new job4"));
         p.shutdown();
         let _ = p.execute(|| println!("do new job5"));
+    }
+
+    #[test]
+    fn test_execute_after_shutdown_fails() {
+        let mut pool = ThreadPool::new(2);
+        pool.shutdown();
+        let res = pool.execute(|| {
+            println!("This should not run");
+        });
+
+        assert!(res.is_err());
     }
 }
