@@ -64,21 +64,6 @@ impl Worker {
                         break;
                     }
                 }
-
-                /* 使用模式匹配 匹配所有分支情况
-                match message {
-                    // 如果传递进来的是新任务就执行
-                    Message::NewJob(job) => {
-                        println!("do job from worker[{}]", id);
-                        job();
-                    }
-                    // 如果是byebye信号就退出线程
-                    Message::ByeBye => {
-                        println!("ByeBye from worker[{}]", id);
-                        break;
-                    }
-                }
-                */
             }
         }).expect("Failed to spawn thread");
 
@@ -94,9 +79,9 @@ impl Worker {
 // 2. 定义工作线程数组，表示具体的工作者族群
 // 3. 如何给线程池内的线程发送一段工作逻辑呢？ 使用mpsc Channel是一个不错的选择，mpsc channel是共享、广播的
 pub struct ThreadPool {
-    workers: Vec<Worker>,          // Worker array
-    max_workers: usize,            // max threads
-    sender: mpsc::Sender<Message>, // channel's sender side
+    workers: Vec<Worker>,                  // Worker array
+    max_workers: usize,                    // max threads
+    sender: Option<mpsc::Sender<Message>>, // channel's sender side
 }
 
 #[allow(dead_code)]
@@ -119,7 +104,7 @@ impl ThreadPool {
         Self {
             workers: workers,
             max_workers: max_workers,
-            sender: tx,
+            sender: Some(tx),
         }
     }
 
@@ -128,26 +113,46 @@ impl ThreadPool {
         F: FnOnce() + 'static + Send, // -> 这个约束是线程闭包的约束
     {
         let job = Message::NewJob(Box::new(f));
-        self.sender.send(job).unwrap();
+        if let Some(sender) = &self.sender {
+            if let Err(e) = sender.send(job) {
+                eprintln!("ThreadPool failed to send job: {}", e);
+            }
+        }
+        // self.sender.send(job).unwrap();
+    }
+
+    pub fn shutdown(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            println!("ThreadPool Shutting down...");
+
+            // 向所有线程发送byebye
+            // 先退出所有的线程, 必须发送等同于max_workers数量的Message::ByeBye才可以让所有线程都可以安全的退出
+            // 因为channel是共享的，是广播给所有的，但是每一次的发送都只能被一个获取到的线程所消费掉，一次发送并不能让所有的线程获得数据
+            // 这是需要特别注意的
+            for _ in 0..self.max_workers {
+                let _ = sender.send(Message::ByeBye);
+            }
+
+            // 等待所有线程安全退出
+            // 等待所有的线程安全退出后，每个线程都会返回JoinHandle
+            // 使用take取出Some，并在原位置放置一个None值, 这是为了防止double-join 造成死锁
+            // join是阻塞调用的，能够确保对应的线程真正的结束
+            for worker in self.workers.iter_mut() {
+                if let Some(handle) = worker.t.take() {
+                    let _ = handle.join();
+                }
+            }
+
+            println!("ThreadPool Shutdown complete");
+        } else {
+            println!("ThreadPool Shutdown already called.");
+        }
     }
 }
 
 impl Drop for ThreadPool {
     fn drop(&mut self) {
-        // 先退出所有的线程, 必须发送等同于max_workers数量的Message::ByeBye才可以让所有线程都可以安全的退出
-        // 因为channel是共享的，是广播给所有的，但是每一次的发送都只能被一个获取到的线程所消费掉，一次发送并不能让所有的线程获得数据
-        // 这是需要特别注意的
-        for _ in 0..self.max_workers {
-            self.sender.send(Message::ByeBye).unwrap();
-        }
-        // 等待所有的线程安全退出后，每个线程都会返回JoinHandle
-        // 使用take取出Some，并在原位置放置一个None值, 这是为了防止double-join 造成死锁
-        // join是阻塞调用的，能够确保对应的线程真正的结束
-        for w in self.workers.iter_mut() {
-            if let Some(t) = w.t.take() {
-                t.join().unwrap();
-            }
-        }
+        self.shutdown();
     }
 }
 
@@ -161,6 +166,16 @@ mod tests {
         p.execute(|| println!("do new job2"));
         p.execute(|| println!("do new job3"));
         p.execute(|| println!("do new job4"));
+        p.execute(|| println!("do new job5"));
+    }
+
+    fn test_shutdown() {
+        let mut p = ThreadPool::new(5);
+        p.execute(|| println!("do new job1"));
+        p.execute(|| println!("do new job2"));
+        p.execute(|| println!("do new job3"));
+        p.execute(|| println!("do new job4"));
+        p.shutdown();
         p.execute(|| println!("do new job5"));
     }
 }

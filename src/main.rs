@@ -13,7 +13,7 @@ fn main() {
         println!("do new job2");
     };
 
-    let p = ThreadPool::new(8);
+    let mut p = ThreadPool::new(8);
     p.execute(|| println!("do new job1"));
     p.execute(f1);
     p.execute(|| println!("do new job3"));
@@ -22,4 +22,8 @@ fn main() {
     p.execute(|| println!("do new job6"));
     p.execute(|| println!("do new job7"));
     p.execute(|| println!("do new job8"));
+
+    p.shutdown();
+
+    p.execute(f1);
 }
