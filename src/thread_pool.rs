@@ -48,7 +48,8 @@ impl Worker {
                         poisoned.into_inner() // 尝试恢复，这是被rust所允许的，尽管知道风险但是还是愿意自己承担风险使用中毒后的值
                     }
                 };
-                // 然后从channel中接收消息
+                // 然后从channel中接收消息, 这里会blocking wait阻塞等待，不会产生忙等待busy waiting
+                // 没有job通过channel进来时线程会被挂起，等到job来临且消费那么当前线程会被唤醒
                 match lock.recv() {
                     Ok(Message::NewJob(job)) => {
                         println!("do job from worker[{}]", id);
