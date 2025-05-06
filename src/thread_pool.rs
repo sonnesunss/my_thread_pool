@@ -108,17 +108,17 @@ impl ThreadPool {
         }
     }
 
-    pub fn execute<F>(&self, f: F)
+    // 返回一个值，让调用方知道是否成功
+    pub fn execute<F>(&self, f: F) -> Result<(), String>
     where
         F: FnOnce() + 'static + Send, // -> 这个约束是线程闭包的约束
     {
         let job = Message::NewJob(Box::new(f));
-        if let Some(sender) = &self.sender {
-            if let Err(e) = sender.send(job) {
-                eprintln!("ThreadPool failed to send job: {}", e);
-            }
+
+        match &self.sender {
+            Some(sender) => sender.send(job).map_err(|e| format!("Send failed: {}", e)),
+            None => Err("ThreadPool is already shut down.".to_string()),
         }
-        // self.sender.send(job).unwrap();
     }
 
     pub fn shutdown(&mut self) {
@@ -162,20 +162,23 @@ mod tests {
     #[test]
     fn it_works() {
         let p = ThreadPool::new(5);
-        p.execute(|| println!("do new job1"));
-        p.execute(|| println!("do new job2"));
-        p.execute(|| println!("do new job3"));
-        p.execute(|| println!("do new job4"));
-        p.execute(|| println!("do new job5"));
+        let _ = p.execute(|| println!("do new job1"));
+        match p.execute(|| println!("do new job2")) {
+            Ok(r) => println!("{:?}", r),
+            Err(e) => eprintln!("{e}"),
+        }
+        let _ = p.execute(|| println!("do new job3"));
+        let _ = p.execute(|| println!("do new job4"));
+        let _ = p.execute(|| println!("do new job5"));
     }
 
     fn test_shutdown() {
         let mut p = ThreadPool::new(5);
-        p.execute(|| println!("do new job1"));
-        p.execute(|| println!("do new job2"));
-        p.execute(|| println!("do new job3"));
-        p.execute(|| println!("do new job4"));
+        let _ = p.execute(|| println!("do new job1"));
+        let _ = p.execute(|| println!("do new job2"));
+        let _ = p.execute(|| println!("do new job3"));
+        let _ = p.execute(|| println!("do new job4"));
         p.shutdown();
-        p.execute(|| println!("do new job5"));
+        let _ = p.execute(|| println!("do new job5"));
     }
 }
