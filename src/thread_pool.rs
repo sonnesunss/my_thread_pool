@@ -6,6 +6,18 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 
+#[cfg(feature = "debug_logs")]
+macro_rules! log {
+    ($($arg:tt)*) => {
+        println!("-> Debug Info: {}", format!($($arg)*));
+    };
+}
+
+#[cfg(not(feature = "debug_logs"))]
+macro_rules! log {
+    ($($arg:tt)*) => {};
+}
+
 type Job = Box<dyn FnOnce() + 'static + Send>;
 // 线程池内允许的最大job数量的默认值
 const MAX_QUEUE_SIZE: usize = 100;
@@ -34,8 +46,8 @@ impl Worker {
         let t = thread::Builder::new()
             .name(format!("worker-{}", id))
             .spawn(move || {
-                let thread_name = thread::current().name().unwrap_or("Unnamed thread").to_string();
-                println!("[{}] Started", thread_name);
+                let _thread_name = thread::current().name().unwrap_or("Unnamed thread").to_string();
+                log!("[{}] Started", _thread_name);
             loop {
                 // 接收发送来的任务
                 // 首先获取锁
@@ -52,7 +64,7 @@ impl Worker {
                 // 没有job通过channel进来时线程会被挂起，等到job来临且消费那么当前线程会被唤醒
                 match lock.recv() {
                     Ok(Message::NewJob(job)) => {
-                        println!("do job from worker[{}]", id);
+                        log!("do job from worker[{}]", id);
                         let result = catch_unwind(AssertUnwindSafe(job));
                         if let Err(e) = result {
                             eprintln!("Job panicked in worker[{}] with error {:?}, but thread continue.", id, e);
@@ -60,7 +72,7 @@ impl Worker {
                     }
                     // 如果是byebye信号就退出线程
                     Ok(Message::ByeBye) => {
-                        println!("ByeBye from worker[{}]", id);
+                        log!("ByeBye from worker[{}]", id);
                         break;
                     }
                     Err(e) => {
@@ -127,7 +139,7 @@ impl ThreadPool {
 
     pub fn shutdown(&mut self) {
         if let Some(sender) = self.sender.take() {
-            println!("ThreadPool Shutting down...");
+            log!("ThreadPool Shutting down...");
 
             // 向所有线程发送byebye
             // 先退出所有的线程, 必须发送等同于max_workers数量的Message::ByeBye才可以让所有线程都可以安全的退出
@@ -147,9 +159,9 @@ impl ThreadPool {
                 }
             }
 
-            println!("ThreadPool Shutdown complete");
+            log!("ThreadPool Shutdown complete");
         } else {
-            println!("ThreadPool Shutdown already called.");
+            log!("ThreadPool Shutdown already called.");
         }
     }
 }
@@ -159,6 +171,8 @@ impl Drop for ThreadPool {
         self.shutdown();
     }
 }
+
+/////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {

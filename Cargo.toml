@@ -3,4 +3,10 @@ name = "my_thread_pool"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []       # 默认不启用任何feature
+debug_logs = []    # 启用调试日志
+
 [dependencies]
+
+
