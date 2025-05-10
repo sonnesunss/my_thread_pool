@@ -165,11 +165,36 @@ impl Drop for ThreadPool {
     }
 }
 
+impl ThreadPool {
+    /// 线程池执行job并返回结果
+    pub fn execute_with_result<F, R>(&self, f: F) -> channel::Receiver<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let (tx, rx) = channel::bounded(1); // bounded(1) 表示一个单值返回通道
+
+        let job = Box::new(move || {
+            let result = f();
+            let _ = tx.send(result);
+        });
+
+        // 任务放进线程池中
+        if let Some(sender) = &self.sender {
+            let _ = sender.send(Message::NewJob(job));
+        }
+
+        rx
+    }
+}
+
 /////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
     #[test]
     fn it_works() {
         let p = ThreadPool::new(5);
@@ -203,5 +228,51 @@ mod tests {
         });
 
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_execute_with_result_basic() {
+        let pool = ThreadPool::new(4);
+
+        let rx = pool.execute_with_result(|| 21 * 2);
+
+        let result = rx.recv().unwrap();
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn test_execute_with_result_string() {
+        let pool = ThreadPool::new(2);
+
+        let rx = pool.execute_with_result(|| "hello".to_string());
+
+        let result = rx.recv().unwrap();
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_multiple_execute_with_result() {
+        let pool = ThreadPool::new(4);
+
+        let handles: Vec<_> = (0..10)
+            .map(|i| pool.execute_with_result(move || i * 2))
+            .collect();
+
+        let mut results: Vec<_> = handles.into_iter().map(|rx| rx.recv().unwrap()).collect();
+        results.sort();
+        assert_eq!(results, (0..10).map(|i| i * 2).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_execute_with_result_after_shutdown() {
+        let mut pool = ThreadPool::new(2);
+        pool.shutdown();
+
+        let rx = pool.execute_with_result(|| 123); // 应该不会真正执行任务
+
+        // 因为线程池已经 shutdown，任务不会执行，所以 recv 会阻塞
+        // 我们加个超时 recv 以防测试卡住
+        let result = rx.recv_timeout(Duration::from_millis(100));
+        assert!(result.is_err()); // 没有收到值
     }
 }
