@@ -7,6 +7,13 @@ edition = "2024"
 default = []       # 默认不启用任何feature
 debug_logs = []    # 调试日志
 
+[lib]
+name = "my_thread_pool"
+path = "src/lib.rs"
+
+[dev-dependencies]
+criterion = "0.5"
+
 [dependencies]
 crossbeam = "0.8.4"
 
