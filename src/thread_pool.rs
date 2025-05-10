@@ -92,6 +92,7 @@ pub struct ThreadPool {
 
 #[allow(dead_code)]
 impl ThreadPool {
+    /// 参数为最大线程数
     pub fn new(max_workers: usize) -> Self {
         if max_workers == 0 {
             panic!("max_workers must be greater than zero!")
@@ -114,6 +115,7 @@ impl ThreadPool {
         }
     }
 
+    /// 发送一个任务给线程池执行
     // 返回一个值，让调用方知道是否成功
     pub fn execute<F>(&self, f: F) -> Result<(), String>
     where
@@ -127,6 +129,7 @@ impl ThreadPool {
         }
     }
 
+    /// 显式关闭线程池
     pub fn shutdown(&mut self) {
         if let Some(sender) = self.sender.take() {
             log!("ThreadPool Shutting down...");
