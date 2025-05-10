@@ -5,8 +5,8 @@ edition = "2024"
 
 [features]
 default = []       # 默认不启用任何feature
-debug_logs = []    # 启用调试日志
+debug_logs = []    # 调试日志
 
 [dependencies]
-
+crossbeam = "0.8.4"
 

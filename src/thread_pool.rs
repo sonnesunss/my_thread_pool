@@ -2,8 +2,9 @@
    实现自己的线程池
 */
 
+use crossbeam::channel;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 #[cfg(feature = "debug_logs")]
@@ -40,7 +41,7 @@ struct Worker {
 #[allow(dead_code)]
 impl Worker {
     // 传递线程id、channel's receiver side
-    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Message>>>) -> Worker {
+    fn new(id: usize, receiver: Arc<channel::Receiver<Message>>) -> Worker {
         // 创建线程，其内循环不主动退出
         // spawn函数会返回一个JoinHandle, 需要这个返回值等待线程的安全退出，在Drop资源时使用
         let t = thread::Builder::new()
@@ -49,20 +50,9 @@ impl Worker {
                 let _thread_name = thread::current().name().unwrap_or("Unnamed thread").to_string();
                 log!("[{}] Started", _thread_name);
             loop {
-                // 接收发送来的任务
-                // 首先获取锁
-                let lock = match receiver.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        eprintln!(
-                            "Worker [{id}] failed to acquire lock due to poisoning. Attempting to recover."
-                        );
-                        poisoned.into_inner() // 尝试恢复，这是被rust所允许的，尽管知道风险但是还是愿意自己承担风险使用中毒后的值
-                    }
-                };
-                // 然后从channel中接收消息, 这里会blocking wait阻塞等待，不会产生忙等待busy waiting
+                // 从channel中接收消息, 这里会blocking wait阻塞等待，不会产生忙等待busy waiting
                 // 没有job通过channel进来时线程会被挂起，等到job来临且消费那么当前线程会被唤醒
-                match lock.recv() {
+                match receiver.recv() {
                     Ok(Message::NewJob(job)) => {
                         log!("do job from worker[{}]", id);
                         let result = catch_unwind(AssertUnwindSafe(job));
@@ -95,9 +85,9 @@ impl Worker {
 // 2. 定义工作线程数组，表示具体的工作者族群
 // 3. 如何给线程池内的线程发送一段工作逻辑呢？ 使用mpsc Channel是一个不错的选择，mpsc channel是共享、广播的
 pub struct ThreadPool {
-    workers: Vec<Worker>,                      // Worker array
-    max_workers: usize,                        // max threads
-    sender: Option<mpsc::SyncSender<Message>>, // channel's sender side
+    workers: Vec<Worker>,                     // Worker array
+    max_workers: usize,                       // max threads
+    sender: Option<channel::Sender<Message>>, // channel's sender side
 }
 
 #[allow(dead_code)]
@@ -108,10 +98,10 @@ impl ThreadPool {
         }
 
         // 创建一个channel，使用它传递具体要执行的任务
-        let (tx, rx) = mpsc::sync_channel(MAX_QUEUE_SIZE);
+        let (tx, rx) = channel::bounded(MAX_QUEUE_SIZE);
 
         let mut workers = Vec::with_capacity(max_workers);
-        let receiver = Arc::new(Mutex::new(rx));
+        let receiver = Arc::new(rx);
 
         for i in 0..max_workers {
             workers.push(Worker::new(i, Arc::clone(&receiver)));
